@@ -1,23 +1,32 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { ref, get, set } from "firebase/database";
+import { rtdb } from "../firebase";
 import { UserProfile } from "../../types";
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
-  const docRef = doc(db, "users", uid);
-  const docSnap = await getDoc(docRef);
-  
-  if (docSnap.exists()) {
-    return docSnap.data() as UserProfile;
+  const userRef = ref(rtdb, `users/${uid}`);
+  const snapshot = await get(userRef);
+
+  if (snapshot.exists()) {
+    return snapshot.val() as UserProfile;
   }
   return null;
 }
 
 export async function createUserProfile(uid: string, data: Partial<UserProfile>): Promise<void> {
-  const docRef = doc(db, "users", uid);
-  await setDoc(docRef, {
+  const userRef = ref(rtdb, `users/${uid}`);
+  const defaultProfile: UserProfile = {
     uid,
-    createdAt: new Date().toISOString(),
+    name: data.name || "Anonymous",
+    workType: "other",
+    perceivedPeakTime: "morning",
+    perceivedAvgSession: 25,
+    topDistractors: [],
     onboardingComplete: false,
+    createdAt: new Date().toISOString(),
+  };
+
+  await set(userRef, {
+    ...defaultProfile,
     ...data,
-  }, { merge: true });
+  });
 }

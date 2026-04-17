@@ -15,8 +15,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signInWithGoogle: async () => {},
-  logOut: async () => {},
+  signInWithGoogle: async () => { },
+  logOut: async () => { },
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -24,20 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Optional: Check if we have a user profile, if not create one
-        try {
-          const profile = await getUserProfile(firebaseUser.uid);
-          if (!profile) {
-            await createUserProfile(firebaseUser.uid, {
-              name: firebaseUser.displayName || "Anonymous",
-            });
-          }
-        } catch (e) {
-          console.error("Error creating profile mapping", e);
-        }
-      }
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
     });
@@ -47,7 +34,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, provider);
+    const firebaseUser = result.user;
+
+    // Ensure profile is created in DB before completing sign-in
+    try {
+      const profile = await getUserProfile(firebaseUser.uid);
+      if (!profile) {
+        await createUserProfile(firebaseUser.uid, {
+          name: firebaseUser.displayName || "Anonymous",
+        });
+      }
+    } catch (e) {
+      console.error("Error creating profile mapping", e);
+    }
   };
 
   const logOut = async () => {
