@@ -1,32 +1,108 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Timer from "@/components/session/Timer";
-import { motion } from "framer-motion";
-import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity, MessageSquare } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getSession } from "@/lib/firestore/sessions";
+import { logPCEvent } from "@/lib/firestore/events";
+import { Session } from "@/types";
 
-// Mock tasks (eventually fetched from Firestore via useSession hook)
-const MOCK_TASKS = [
-  { id: 1, text: "Set up Firebase schema", done: true },
-  { id: 2, text: "Build Active Session UI", done: false },
-  { id: 3, text: "Link PC + Phone events", done: false },
-];
-
-const MOCK_LOGS = [
-  { id: 1, time: "10:05", message: "Session started", type: "system" },
-  { id: 2, time: "10:12", message: "Phone picked up", type: "distraction" },
-  { id: 3, time: "10:14", message: "Phone locked", type: "success" },
-  { id: 4, time: "10:20", message: "Tab visibility lost", type: "distraction" }
-];
-
-export default function ActiveSessionPage() {
+function ActiveSessionInner() {
   const router = useRouter();
-  const TOTAL = 45 * 60; // 45 minutes
-  const [remaining, setRemaining] = useState(TOTAL);
-  const [isPaused, setIsPaused] = useState(false);
-  const [tasks, setTasks] = useState(MOCK_TASKS);
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("id");
+  const { user } = useAuth();
 
+  const [sessionData, setSessionData] = useState<Session | null>(null);
+  const [remaining, setRemaining] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
+  
+  // Notification banner state
+  const [activeNotification, setActiveNotification] = useState<{ title: string; message: string } | null>(null);
+
+  const lastSyncTs = useRef<string>("");
+
+  const addLog = (type: "distraction" | "success" | "system", message: string) => {
+    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    setLogs(prev => [{ id: Date.now() + Math.random(), time, message, type }, ...prev].slice(0, 15));
+  };
+
+  // 1. Initial Load
+  useEffect(() => {
+    if (sessionId) {
+      getSession(sessionId).then(data => {
+        if (data) {
+          setSessionData(data);
+          setRemaining(data.plannedDuration * 60);
+          setTasks(data.tasks);
+          addLog("system", "Session activated securely");
+        }
+      }).catch(console.error);
+    }
+  }, [sessionId]);
+
+  // 2. Tab Visibility Detection
+  useEffect(() => {
+    if (!sessionId) return;
+    const handleVisibility = () => {
+      if (document.hidden) {
+        addLog("distraction", "Tab visibility lost");
+        logPCEvent(sessionId, { type: "tab_leave", timestamp: new Date().toISOString() }).catch(console.error);
+        setIsPaused(true);
+      } else {
+        addLog("success", "Returned to tab");
+        logPCEvent(sessionId, { type: "tab_return", timestamp: new Date().toISOString() }).catch(console.error);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [sessionId]);
+
+  // 3. Phone Real-Time Sync
+  useEffect(() => {
+    if (!user || !sessionId) return;
+    
+    const unsub = onSnapshot(doc(db, "activeSession", user.uid), (docSn) => {
+      if (docSn.exists()) {
+        const data = docSn.data();
+        if (data.sessionId === sessionId && data.lastPhoneEvent) {
+          const ev = data.lastPhoneEvent;
+          
+          if (ev.timestamp !== lastSyncTs.current) {
+            lastSyncTs.current = ev.timestamp;
+            
+            if (ev.type === "pickup") {
+              addLog("distraction", "Phone picked up");
+            } else if (ev.type === "putdown") {
+              addLog("success", "Phone placed face-down");
+            } else if (ev.type === "intent_logged") {
+              addLog("system", `Recorded phone use: ${ev.intent}`);
+            } else if (ev.type === "important_notification") {
+              // Show the banner and log it
+              setActiveNotification({ title: "Important Notification", message: ev.message });
+              addLog("system", `Intercepted: ${ev.message}`);
+              
+              // Auto-dismiss banner after 5 seconds
+              setTimeout(() => {
+                setActiveNotification(null);
+              }, 5000);
+            }
+          }
+        }
+      }
+    });
+
+    return () => unsub();
+  }, [user, sessionId]);
+
+  // 4. Timer Logic
   useEffect(() => {
     if (isPaused || remaining <= 0) return;
     const interval = setInterval(() => {
@@ -35,19 +111,46 @@ export default function ActiveSessionPage() {
     return () => clearInterval(interval);
   }, [isPaused, remaining]);
 
-  const toggleTask = (id: number) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, done: !t.done } : t));
+  const toggleTask = (id: string) => {
+    setTasks(tasks.map((t: any) => t.id === id ? { ...t, done: !t.done } : t));
   };
 
   const endSession = () => {
-    // Navigate to debrief page, we can use a dummy ID for now
-    router.push("/debrief/DEMO-SESSION-123");
+    router.push(`/debrief/${sessionId}`);
+  };
+
+  const simulateNotification = () => {
+    setActiveNotification({ title: "Important Notification", message: "Mom: Are you coming home for dinner?" });
+    addLog("system", `Intercepted: Mom: Are you coming home for dinner?`);
+    
+    setTimeout(() => {
+      setActiveNotification(null);
+    }, 5000);
   };
 
   return (
     <div className="min-h-screen bg-bg-primary text-text-primary p-6 grid grid-cols-1 lg:grid-cols-[300px_1fr_300px] gap-8 relative z-10 hidden-scrollbar overflow-x-hidden">
-      {/* Background Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent-primary/[0.04] blur-[120px] rounded-full pointer-events-none" />
+
+      {/* --- NOTIFICATION BANNER --- */}
+      <AnimatePresence>
+        {activeNotification && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50, x: "-50%" }}
+            animate={{ opacity: 1, y: 30, x: "-50%" }}
+            exit={{ opacity: 0, y: -50, x: "-50%" }}
+            className="absolute top-0 left-1/2 z-50 flex items-center gap-4 bg-bg-elevated border border-accent-primary shadow-[0_10px_40px_rgba(108,99,255,0.3)] px-6 py-4 rounded-2xl min-w-[320px]"
+          >
+            <div className="w-10 h-10 rounded-full bg-accent-primary/20 flex items-center justify-center shrink-0">
+              <MessageSquare className="w-5 h-5 text-accent-primary" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-accent-primary uppercase tracking-wider mb-0.5">{activeNotification.title}</p>
+              <p className="text-sm font-medium text-text-primary">{activeNotification.message}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* LEFT: Task Checklist */}
       <div className="hidden lg:flex flex-col gap-6 pt-10">
@@ -57,7 +160,7 @@ export default function ActiveSessionPage() {
         </div>
         
         <div className="flex flex-col gap-3">
-          {tasks.map(task => (
+          {tasks.map((task: any) => (
             <motion.div 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -83,12 +186,19 @@ export default function ActiveSessionPage() {
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-10 text-center"
+          className="mb-10 text-center flex flex-col gap-3"
         >
-          <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent-primary/10 border border-accent-primary/20 text-accent-primary text-xs font-bold tracking-[0.2em] shadow-[0_0_15px_rgba(108,99,255,0.15)]">
-            <span className="w-2 h-2 rounded-full bg-accent-primary animate-pulse" />
-            STRICT MODE ACTIVE
-          </span>
+          {sessionData?.title ? (
+            <h1 className="text-xl font-bold tracking-tight text-white mb-2">{sessionData.title}</h1>
+          ) : (
+            <h1 className="text-xl font-bold tracking-tight text-white mb-2">Focus Session</h1>
+          )}
+          <div>
+            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent-primary/10 border border-accent-primary/20 text-accent-primary text-xs font-bold tracking-[0.2em] shadow-[0_0_15px_rgba(108,99,255,0.15)] uppercase">
+              <span className={`w-2 h-2 rounded-full bg-accent-primary ${!isPaused ? 'animate-pulse' : 'opacity-50'}`} />
+              {sessionData?.focusMode || "STRICT"} MODE ACTIVE
+            </span>
+          </div>
         </motion.div>
 
         <motion.div
@@ -97,12 +207,11 @@ export default function ActiveSessionPage() {
            transition={{ duration: 0.5, ease: "easeOut" }}
         >
           <Timer
-            totalSeconds={TOTAL}
+            totalSeconds={sessionData?.plannedDuration ? sessionData.plannedDuration * 60 : 25 * 60}
             remainingSeconds={remaining}
             isPaused={isPaused}
           />
         </motion.div>
-
       </div>
 
       {/* RIGHT: Live Event Log */}
@@ -114,11 +223,11 @@ export default function ActiveSessionPage() {
         <div className="h-[1px] w-full bg-border border-b border-border/50 shrink-0 mb-2" />
 
         <div className="flex flex-col gap-4 overflow-y-auto pr-2">
-          {MOCK_LOGS.map((log, i) => (
+          {logs.map((log, i) => (
             <motion.div 
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
+              transition={{ delay: i * 0.05 }}
               key={log.id} 
               className="flex gap-4 text-sm items-start"
             >
@@ -133,6 +242,9 @@ export default function ActiveSessionPage() {
               </span>
             </motion.div>
           ))}
+          {logs.length === 0 && (
+            <div className="text-sm text-text-tertiary text-center mt-6">Awaiting events...</div>
+          )}
         </div>
       </div>
 
@@ -141,8 +253,19 @@ export default function ActiveSessionPage() {
         <motion.button 
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
+          onClick={simulateNotification}
+          className="flex items-center gap-2 px-5 py-3 rounded-xl border border-accent-secondary/50 text-accent-secondary hover:bg-accent-secondary/10 hover:border-accent-secondary transition-colors font-medium text-sm cursor-pointer"
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span className="hidden sm:inline">Simulate Text</span>
+          <span className="sm:hidden">Test</span>
+        </motion.button>
+
+        <motion.button 
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
           onClick={() => setIsPaused(true)}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl border border-accent-warning/50 text-accent-warning hover:bg-accent-warning/10 hover:border-accent-warning transition-colors font-medium text-sm"
+          className="flex items-center gap-2 px-5 py-3 rounded-xl border border-accent-warning/50 text-accent-warning hover:bg-accent-warning/10 hover:border-accent-warning transition-colors font-medium text-sm cursor-pointer"
         >
           <AlertTriangle className="w-4 h-4" />
           <span className="hidden sm:inline">I got distracted</span>
@@ -170,5 +293,14 @@ export default function ActiveSessionPage() {
         </motion.button>
       </div>
     </div>
+  );
+}
+
+// Wrap inside Suspense to handle Next.js 15 useSearchParams requirement
+export default function ActiveSessionPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-bg-primary" />}>
+      <ActiveSessionInner />
+    </Suspense>
   );
 }
