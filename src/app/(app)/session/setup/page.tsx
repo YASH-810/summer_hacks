@@ -211,8 +211,8 @@ export default function SessionSetupPage() {
   /* ── Derived ── */
   const phoneUrl: string =
     typeof window !== "undefined"
-      ? `${window.location.origin}/phone/${sessionId}`
-      : `/phone/${sessionId}`;
+      ? `${window.location.origin}/phone/${sessionId}?userId=${user?.uid || ""}`
+      : `/phone/${sessionId}?userId=${user?.uid || ""}`;
 
   const selectedMode = FOCUS_MODES.find((m) => m.id === focusMode);
 
