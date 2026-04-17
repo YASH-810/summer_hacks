@@ -1,5 +1,5 @@
-import { collection, doc, setDoc, getDoc, updateDoc, query, where, orderBy, getDocs } from "firebase/firestore";
-import { db } from "../firebase";
+import { ref, get, update, set } from "firebase/database";
+import { db, rtdb } from "../firebase";
 import { Session } from "../../types";
 
 export async function createSession(sessionData: Session): Promise<void> {
@@ -39,4 +39,18 @@ export async function updateActiveSessionBridge(userId: string, data: any): Prom
     ...data,
     updatedAt: new Date().toISOString()
   }, { merge: true });
+}
+// Realtime Database Versions
+export async function getSessionRTDB(userId: string, sessionId: string): Promise<Session | null> {
+  const sessionRef = ref(rtdb, `users/${userId}/sessions/${sessionId}`);
+  const snapshot = await get(sessionRef);
+  if (snapshot.exists()) {
+    return snapshot.val() as Session;
+  }
+  return null;
+}
+
+export async function updateSessionRTDB(userId: string, sessionId: string, data: Partial<Session>): Promise<void> {
+  const sessionRef = ref(rtdb, `users/${userId}/sessions/${sessionId}`);
+  await update(sessionRef, data);
 }

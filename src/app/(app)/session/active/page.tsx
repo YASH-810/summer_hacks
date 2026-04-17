@@ -6,11 +6,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity, MessageSquare } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { getSession } from "@/lib/firestore/sessions";
-import { logPCEvent } from "@/lib/firestore/events";
-import { Session } from "@/types";
+import { ref, onValue, get, set } from "firebase/database";
+import { rtdb } from "@/lib/firebase";
+import { getSessionRTDB, updateSessionRTDB } from "@/lib/firestore/sessions";
+import { logPCEventRTDB } from "@/lib/firestore/events";
+import { Session, Task } from "@/types";
 
 function ActiveSessionInner() {
   const router = useRouter();
@@ -28,50 +28,87 @@ function ActiveSessionInner() {
   const [activeNotification, setActiveNotification] = useState<{ title: string; message: string } | null>(null);
 
   const lastSyncTs = useRef<string>("");
+  const timeInitialized = useRef<boolean>(false);
 
   const addLog = (type: "distraction" | "success" | "system", message: string) => {
     const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
     setLogs(prev => [{ id: Date.now() + Math.random(), time, message, type }, ...prev].slice(0, 15));
   };
 
-  // 1. Initial Load
+  // 1. Initial Load & Real-time Sync
+  useEffect(() => {
+    if (!user || !sessionId) return;
+    
+    // First try user-scoped session path
+    const scopedRef = ref(rtdb, `users/${user.uid}/sessions/${sessionId}`);
+    // Fallback un-scoped legacy path
+    const legacyRef = ref(rtdb, `sessions/${sessionId}`);
+    
+    const unsubscribe = onValue(scopedRef, async (snapshot) => {
+      let data = snapshot.val();
+      
+      // If it doesn't exist at the new scoped path, check the legacy path
+      if (!snapshot.exists()) {
+        const legacySnap = await get(legacyRef);
+        if (legacySnap.exists()) {
+           data = legacySnap.val();
+        } else {
+           return; // Session truly not found
+        }
+      }
+
+      setSessionData(data as Session);
+      
+      if (!timeInitialized.current && data.plannedDuration) {
+        setRemaining(data.plannedDuration * 60);
+        timeInitialized.current = true;
+      }
+      
+      let sTasks = data.sessionTasks || data.tasks || [];
+      if (!Array.isArray(sTasks)) {
+        sTasks = Object.values(sTasks);
+      }
+      setTasks(sTasks);
+    });
+
+    return () => unsubscribe();
+  }, [user, sessionId]);
+
+  // Add initial log
   useEffect(() => {
     if (sessionId) {
-      getSession(sessionId).then(data => {
-        if (data) {
-          setSessionData(data);
-          setRemaining(data.plannedDuration * 60);
-          setTasks(data.tasks);
-          addLog("system", "Session activated securely");
-        }
-      }).catch(console.error);
+      addLog("system", "Session activated securely");
     }
   }, [sessionId]);
 
   // 2. Tab Visibility Detection
   useEffect(() => {
-    if (!sessionId) return;
+    if (!user || !sessionId) return;
     const handleVisibility = () => {
       if (document.hidden) {
         addLog("distraction", "Tab visibility lost");
-        logPCEvent(sessionId, { type: "tab_leave", timestamp: new Date().toISOString() }).catch(console.error);
+        logPCEventRTDB(user.uid, sessionId, { type: "tab_leave", timestamp: new Date().toISOString() }).catch(console.error);
         setIsPaused(true);
       } else {
         addLog("success", "Returned to tab");
-        logPCEvent(sessionId, { type: "tab_return", timestamp: new Date().toISOString() }).catch(console.error);
+        logPCEventRTDB(user.uid, sessionId, { type: "tab_return", timestamp: new Date().toISOString() }).catch(console.error);
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [sessionId]);
+  }, [user, sessionId]);
 
-  // 3. Phone Real-Time Sync
+  // 3. Phone Real-Time Sync (Simplified to listen to user document)
   useEffect(() => {
     if (!user || !sessionId) return;
     
-    const unsub = onSnapshot(doc(db, "activeSession", user.uid), (docSn) => {
-      if (docSn.exists()) {
-        const data = docSn.data();
+    // Listening for bridge updates from phone
+    // Assuming phone still writes to users/{userId}/activeSessionBridge for cross-device alerts
+    const bridgeRef = ref(rtdb, `users/${user.uid}/activeSessionBridge`);
+    
+    const unsub = onValue(bridgeRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
         if (data.sessionId === sessionId && data.lastPhoneEvent) {
           const ev = data.lastPhoneEvent;
           
@@ -85,14 +122,9 @@ function ActiveSessionInner() {
             } else if (ev.type === "intent_logged") {
               addLog("system", `Recorded phone use: ${ev.intent}`);
             } else if (ev.type === "important_notification") {
-              // Show the banner and log it
               setActiveNotification({ title: "Important Notification", message: ev.message });
               addLog("system", `Intercepted: ${ev.message}`);
-              
-              // Auto-dismiss banner after 5 seconds
-              setTimeout(() => {
-                setActiveNotification(null);
-              }, 5000);
+              setTimeout(() => setActiveNotification(null), 5000);
             }
           }
         }
@@ -111,12 +143,45 @@ function ActiveSessionInner() {
     return () => clearInterval(interval);
   }, [isPaused, remaining]);
 
-  const toggleTask = (id: string) => {
-    setTasks(tasks.map((t: any) => t.id === id ? { ...t, done: !t.done } : t));
+  const toggleTask = async (id: string) => {
+    if (!user || !sessionId) return;
+    const newTasks = tasks.map((t: any) => t.id === id ? { ...t, done: !t.done } : t);
+    setTasks(newTasks);
+    // Persist to RTDB
+    await updateSessionRTDB(user.uid, sessionId, { sessionTasks: newTasks } as any);
   };
 
-  const endSession = () => {
-    router.push(`/debrief/${sessionId}`);
+  const endSession = async () => {
+    if (!user || !sessionId) return;
+
+    try {
+      // 1. Return unfinished tasks to global backlog
+      const unfinishedTasks = tasks.filter(t => !t.done);
+      if (unfinishedTasks.length > 0) {
+        const globalTasksRef = ref(rtdb, `users/${user.uid}/tasks`);
+        const snapshot = await get(globalTasksRef);
+        let currentGlobalTasks: Task[] = [];
+        if (snapshot.exists()) {
+          currentGlobalTasks = snapshot.val() as Task[];
+        }
+        
+        // Append unfinished tasks
+        const updatedGlobalTasks = [...unfinishedTasks, ...currentGlobalTasks];
+        await set(globalTasksRef, updatedGlobalTasks);
+      }
+
+      // 2. Mark session as completed
+      await updateSessionRTDB(user.uid, sessionId, { 
+        status: "completed",
+        endTime: new Date().toISOString()
+      });
+
+      router.push(`/debrief/${sessionId}`);
+    } catch (error) {
+      console.error("Error ending session:", error);
+      // Fallback redirect
+      router.push(`/debrief/${sessionId}`);
+    }
   };
 
   const simulateNotification = () => {
@@ -152,32 +217,37 @@ function ActiveSessionInner() {
         )}
       </AnimatePresence>
 
-      {/* LEFT: Task Checklist */}
+      {/* LEFT: Live Event Log */}
       <div className="hidden lg:flex flex-col gap-6 pt-10">
-        <div>
-          <h2 className="text-sm font-bold text-text-secondary tracking-widest uppercase mb-1" style={{ fontFamily: "var(--font-headline)" }}>Current Objectives</h2>
-          <div className="h-[1px] w-full bg-border border-b border-border/50 mt-3 mb-4 shrink-0" />
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-text-secondary tracking-widest uppercase mb-1" style={{ fontFamily: "var(--font-headline)" }}>Live Event Log</h2>
+          <Activity className="w-4 h-4 text-text-tertiary" />
         </div>
-        
-        <div className="flex flex-col gap-3">
-          {tasks.map((task: any) => (
+        <div className="h-[1px] w-full bg-border border-b border-border/50 shrink-0 mb-2" />
+
+        <div className="flex flex-col gap-4 overflow-y-auto pr-2">
+          {logs.map((log, i) => (
             <motion.div 
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              key={task.id} 
-              onClick={() => toggleTask(task.id)}
-              className={`group flex items-start gap-4 p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${task.done ? "bg-accent-secondary/5 border-accent-secondary/20 shadow-[0_0_15px_rgba(0,212,170,0.05)]" : "bg-bg-secondary border-border hover:border-accent-primary/40 hover:shadow-[0_0_20px_rgba(108,99,255,0.08)]"}`}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.05 }}
+              key={log.id} 
+              className="flex gap-4 text-sm items-start"
             >
-              {task.done ? (
-                <CheckCircle2 className="w-5 h-5 text-accent-secondary shrink-0 mt-0.5" />
-              ) : (
-                <Circle className="w-5 h-5 text-text-tertiary group-hover:text-accent-primary shrink-0 mt-0.5 transition-colors" />
-              )}
-              <span className={`text-sm tracking-wide ${task.done ? "text-text-secondary line-through opacity-60" : "text-text-primary"}`}>
-                {task.text}
+              <span className="text-text-tertiary w-12 shrink-0 tabular-nums font-medium tracking-wider" style={{ fontFamily: "var(--font-mono)" }}>
+                {log.time}
+              </span>
+              <span className={`leading-relaxed ${
+                log.type === "distraction" ? "text-accent-warning bg-accent-warning/10 px-2 py-0.5 rounded-md" :
+                log.type === "success" ? "text-accent-secondary" : "text-text-secondary"
+              }`}>
+                {log.message}
               </span>
             </motion.div>
           ))}
+          {logs.length === 0 && (
+            <div className="text-sm text-text-tertiary text-center mt-6">Awaiting events...</div>
+          )}
         </div>
       </div>
 
@@ -214,36 +284,34 @@ function ActiveSessionInner() {
         </motion.div>
       </div>
 
-      {/* RIGHT: Live Event Log */}
+      {/* RIGHT: Task Checklist */}
       <div className="hidden lg:flex flex-col gap-6 pt-10">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-text-secondary tracking-widest uppercase mb-1" style={{ fontFamily: "var(--font-headline)" }}>Live Event Log</h2>
-          <Activity className="w-4 h-4 text-text-tertiary" />
+        <div>
+          <h2 className="text-sm font-bold text-text-secondary tracking-widest uppercase mb-1" style={{ fontFamily: "var(--font-headline)" }}>Current Objectives</h2>
+          <div className="h-[1px] w-full bg-border border-b border-border/50 mt-3 mb-4 shrink-0" />
         </div>
-        <div className="h-[1px] w-full bg-border border-b border-border/50 shrink-0 mb-2" />
-
-        <div className="flex flex-col gap-4 overflow-y-auto pr-2">
-          {logs.map((log, i) => (
+        
+        <div className="flex flex-col gap-3">
+          {tasks.map((task: any) => (
             <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              key={log.id} 
-              className="flex gap-4 text-sm items-start"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              key={task.id} 
+              onClick={() => toggleTask(task.id)}
+              className={`group flex items-start gap-4 p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${task.done ? "bg-accent-secondary/5 border-accent-secondary/20 shadow-[0_0_15px_rgba(0,212,170,0.05)]" : "bg-bg-secondary border-border hover:border-accent-primary/40 hover:shadow-[0_0_20px_rgba(108,99,255,0.08)]"}`}
             >
-              <span className="text-text-tertiary w-12 shrink-0 tabular-nums font-medium tracking-wider" style={{ fontFamily: "var(--font-mono)" }}>
-                {log.time}
-              </span>
-              <span className={`leading-relaxed ${
-                log.type === "distraction" ? "text-accent-warning bg-accent-warning/10 px-2 py-0.5 rounded-md" :
-                log.type === "success" ? "text-accent-secondary" : "text-text-secondary"
-              }`}>
-                {log.message}
+              {task.done ? (
+                <CheckCircle2 className="w-5 h-5 text-accent-secondary shrink-0 mt-0.5" />
+              ) : (
+                <Circle className="w-5 h-5 text-text-tertiary group-hover:text-accent-primary shrink-0 mt-0.5 transition-colors" />
+              )}
+              <span className={`text-sm tracking-wide ${task.done ? "text-text-secondary line-through opacity-60" : "text-text-primary"}`}>
+                {task.text}
               </span>
             </motion.div>
           ))}
-          {logs.length === 0 && (
-            <div className="text-sm text-text-tertiary text-center mt-6">Awaiting events...</div>
+          {tasks.length === 0 && (
+            <div className="text-sm text-text-tertiary text-center mt-6">No tasks defined</div>
           )}
         </div>
       </div>

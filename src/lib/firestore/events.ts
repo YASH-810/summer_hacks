@@ -1,5 +1,5 @@
-import { collection, addDoc, doc, setDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { push, ref, set } from "firebase/database";
+import { db, rtdb } from "../firebase";
 import { PCEvent, PhoneEvent } from "../../types";
 
 export async function logPCEvent(sessionId: string, eventData: Omit<PCEvent, 'id'>): Promise<void> {
@@ -28,4 +28,13 @@ export async function updateLastPCEvent(userId: string, sessionId: string, event
     lastPCEvent: eventData,
     updatedAt: new Date().toISOString()
   }, { merge: true });
+}
+// Realtime Database versions
+export async function logPCEventRTDB(userId: string, sessionId: string, eventData: Omit<PCEvent, 'id'>): Promise<void> {
+  const eventsRef = ref(rtdb, `users/${userId}/sessions/${sessionId}/pcEvents`);
+  const newEventRef = push(eventsRef);
+  await set(newEventRef, {
+    ...eventData,
+    id: newEventRef.key
+  });
 }
