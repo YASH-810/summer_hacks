@@ -4,6 +4,8 @@ import { useState, useCallback, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
+import { ref, set } from "firebase/database";
+import { rtdb } from "@/lib/firebase";
 import {
   Play,
   Plus,
@@ -18,9 +20,13 @@ import {
   Target,
   ListChecks,
   Settings2,
+  ArrowDownToLine,
   type LucideIcon,
 } from "lucide-react";
 import type { FocusMode, Task } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
+import { useFirebaseTasks } from "@/hooks/useFirebaseTasks";
+import { ImportTasksModal } from "@/components/session/ImportTasksModal";
 
 /* ─── Types ─── */
 interface FocusModeConfig {
@@ -107,6 +113,8 @@ function generateSessionId(): string {
    ═══════════════════════════════════════════════════════════════ */
 export default function SessionSetupPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const { tasks: globalTasks, removeTasks } = useFirebaseTasks(user?.uid);
 
   /* ── State ── */
   const [title, setTitle] = useState<string>("");
@@ -118,6 +126,9 @@ export default function SessionSetupPage() {
   const [focusMode, setFocusMode] = useState<FocusMode>("balanced");
   const [energy, setEnergy] = useState<number>(3);
   const [sessionId] = useState<string>(() => generateSessionId());
+  
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [importedTaskIds, setImportedTaskIds] = useState<string[]>([]);
 
   /* ── Handlers ── */
   const addTask = useCallback(() => {
@@ -158,12 +169,43 @@ export default function SessionSetupPage() {
     }
   };
 
+  const handleImport = useCallback((imported: Task[]) => {
+    setTasks((prev) => [...prev, ...imported]);
+    setImportedTaskIds((prev) => [...prev, ...imported.map(t => t.id)]);
+  }, []);
+
   const canStart: boolean = title.trim().length > 0 && tasks.length > 0;
 
-  const handleStart = (): void => {
-    if (!canStart) return;
-    // TODO: Save session to Firestore, then navigate
-    router.push("/session/active");
+  const handleStart = async (): Promise<void> => {
+    if (!canStart || !user) return;
+    
+    const sessionRef = ref(rtdb, `sessions/${sessionId}`);
+    const sessionData = {
+      id: sessionId,
+      userId: user.uid,
+      title,
+      plannedDuration: duration,
+      focusMode,
+      energyBefore: energy,
+      sessionTasks: tasks, // Explicitly naming as sessionTasks per request
+      status: "active",
+      phoneLinked: false,
+      startTime: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    
+    try {
+      await set(sessionRef, sessionData);
+      
+      // Delete imported tasks from the global database
+      if (importedTaskIds.length > 0) {
+        await removeTasks(importedTaskIds);
+      }
+      
+      router.push(`/session/active`);
+    } catch (err) {
+      console.error("Failed to start session:", err);
+    }
   };
 
   /* ── Derived ── */
@@ -176,7 +218,12 @@ export default function SessionSetupPage() {
 
   return (
     <div className="relative min-h-screen flex flex-col z-10">
-
+      <ImportTasksModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        globalTasks={globalTasks}
+        onImport={handleImport}
+      />
 
       {/* ── Main Content ── */}
       <motion.main
@@ -244,14 +291,23 @@ export default function SessionSetupPage() {
                     Tasks
                   </h3>
                 </div>
-                {tasks.length > 0 && (
-                  <span
-                    className="text-xs px-2.5 py-1 rounded-full bg-bg-elevated text-text-secondary"
-                    style={{ fontFamily: "var(--font-mono)" }}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-bg-elevated border border-accent-primary/50 text-xs font-semibold text-accent-primary hover:bg-accent-primary/10 transition-colors cursor-pointer"
                   >
-                    {tasks.length} task{tasks.length !== 1 ? "s" : ""}
-                  </span>
-                )}
+                    <ArrowDownToLine size={14} />
+                    Import
+                  </button>
+                  {tasks.length > 0 && (
+                    <span
+                      className="text-xs px-2.5 py-1 rounded-full bg-bg-elevated text-text-secondary"
+                      style={{ fontFamily: "var(--font-mono)" }}
+                    >
+                      {tasks.length} task{tasks.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Add Task Input */}

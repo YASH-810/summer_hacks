@@ -55,5 +55,11 @@ export function useFirebaseTasks(uid?: string | null) {
     }
   };
 
-  return { tasks, setTasks, loading } as const;
+  const removeTasks = async (taskIds: string[]) => {
+    if (!uid) return;
+    const remainingTasks = tasks.filter(t => !taskIds.includes(t.id));
+    await setTasks(remainingTasks);
+  };
+
+  return { tasks, setTasks, removeTasks, loading } as const;
 }
