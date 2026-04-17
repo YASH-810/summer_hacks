@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -14,11 +15,13 @@ import {
 const NAV_ITEMS = [
   { id: "dashboard", label: "Overview", icon: LayoutDashboard, href: "/dashboard" },
   { id: "setup", label: "New Session", icon: Zap, href: "/session/setup" },
-  { id: "tasks", label: "Task Backlog", icon: ListTodo, href: "/tasks" },
 ];
+
+import { GlobalTasksModal } from "@/components/GlobalTasksModal";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [isTasksModalOpen, setIsTasksModalOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-bg-primary">
@@ -60,6 +63,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          
+          {/* Global Tasks Button Trigger */}
+          <motion.button
+            onClick={() => setIsTasksModalOpen(true)}
+            whileHover={{ x: 4 }}
+            whileTap={{ scale: 0.98 }}
+            className="flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer text-text-secondary hover:text-text-primary hover:bg-bg-elevated/50 border border-transparent text-left w-full"
+          >
+            <ListTodo size={20} className="text-text-tertiary group-hover:text-text-secondary shrink-0" />
+            <span className="hidden md:block text-sm font-semibold">Global Tasks</span>
+          </motion.button>
         </nav>
 
         <div className="mt-auto pt-6 border-t border-border">
@@ -79,6 +93,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+
+      <GlobalTasksModal 
+        isOpen={isTasksModalOpen} 
+        onClose={() => setIsTasksModalOpen(false)} 
+      />
     </div>
   );
 }

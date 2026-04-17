@@ -170,17 +170,16 @@ function ActiveSessionInner() {
         await set(globalTasksRef, updatedGlobalTasks);
       }
 
-      // 2. Mark session as completed
-      await updateSessionRTDB(user.uid, sessionId, { 
-        status: "completed",
-        endTime: new Date().toISOString()
-      });
+      // 2. Delete the session completely from RTDB
+      const sessionRef = ref(rtdb, `users/${user.uid}/sessions/${sessionId}`);
+      await set(sessionRef, null);
 
-      router.push(`/debrief/${sessionId}`);
+      // Redirect to session/active as requested
+      router.push(`/session/active`);
     } catch (error) {
       console.error("Error ending session:", error);
       // Fallback redirect
-      router.push(`/debrief/${sessionId}`);
+      router.push(`/session/active`);
     }
   };
 
@@ -192,6 +191,34 @@ function ActiveSessionInner() {
       setActiveNotification(null);
     }, 5000);
   };
+
+  if (!sessionId) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-bg-primary text-text-primary px-4 text-center relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-accent-secondary/[0.05] blur-[100px] rounded-full pointer-events-none" />
+        
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md relative z-10 space-y-6"
+        >
+          <div className="w-24 h-24 bg-accent-secondary/10 rounded-full flex items-center justify-center mx-auto mb-8 shadow-[0_0_30px_rgba(0,212,170,0.15)] border border-accent-secondary/20">
+            <Flag className="w-10 h-10 text-accent-secondary" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-white m-0">Session Ended</h1>
+          <p className="text-text-secondary pb-4 leading-relaxed">
+            Your focus session has been completely cleared and any remaining tasks were securely returned to your global backlog.
+          </p>
+          <button 
+            onClick={() => router.push('/session/setup')}
+            className="px-8 py-3.5 rounded-xl bg-accent-primary text-white font-bold tracking-wide hover:brightness-110 shadow-[0_0_20px_rgba(108,99,255,0.25)] transition-all cursor-pointer"
+          >
+            Start New Session
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-bg-primary text-text-primary p-6 grid grid-cols-1 lg:grid-cols-[300px_1fr_300px] gap-8 relative z-10 hidden-scrollbar overflow-x-hidden">

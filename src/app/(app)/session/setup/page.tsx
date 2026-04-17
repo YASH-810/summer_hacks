@@ -202,7 +202,7 @@ export default function SessionSetupPage() {
         await removeTasks(importedTaskIds);
       }
       
-      router.push(`/session/active`);
+      router.push(`/session/active?id=${sessionId}`);
     } catch (err) {
       console.error("Failed to start session:", err);
     }
