@@ -179,7 +179,7 @@ export default function SessionSetupPage() {
   const handleStart = async (): Promise<void> => {
     if (!canStart || !user) return;
     
-    const sessionRef = ref(rtdb, `sessions/${sessionId}`);
+    const sessionRef = ref(rtdb, `users/${user.uid}/sessions/${sessionId}`);
     const sessionData = {
       id: sessionId,
       userId: user.uid,
