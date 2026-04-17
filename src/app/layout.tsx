@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Mono, DM_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "../contexts/AuthContext";
 
 const spaceMono = Space_Mono({
   variable: "--font-headline",
@@ -36,7 +37,9 @@ export default function RootLayout({
       lang="en"
       className={`${spaceMono.variable} ${dmSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col relative">{children}</body>
+      <body className="min-h-full flex flex-col relative">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
