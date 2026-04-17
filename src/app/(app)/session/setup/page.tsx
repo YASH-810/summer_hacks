@@ -176,29 +176,7 @@ export default function SessionSetupPage() {
 
   return (
     <div className="relative min-h-screen flex flex-col z-10">
-      {/* ── Header ── */}
-      <header className="flex items-center justify-between px-6 md:px-10 py-5 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "var(--accent-primary)" }}
-          >
-            <Target size={18} color="white" />
-          </div>
-          <h1
-            className="text-lg font-bold tracking-tight text-text-primary"
-            style={{ fontFamily: "var(--font-headline)" }}
-          >
-            FocusOS
-          </h1>
-        </div>
-        <span
-          className="text-sm text-text-secondary"
-          style={{ fontFamily: "var(--font-headline)" }}
-        >
-          New Session
-        </span>
-      </header>
+
 
       {/* ── Main Content ── */}
       <motion.main
