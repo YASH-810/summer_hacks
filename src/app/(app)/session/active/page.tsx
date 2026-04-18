@@ -27,6 +27,25 @@ function ActiveSessionInner() {
   // Notification banner state
   const [activeNotification, setActiveNotification] = useState<{ title: string; message: string } | null>(null);
 
+  // Warden Violation Data
+  const [violationData, setViolationData] = useState<{ app: string } | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.onViolation((data) => {
+        setViolationData(data);
+        addLog("distraction", `Warden Violation: ${data.app}`);
+      });
+    }
+  }, []);
+
+  const handleResumeLockdown = () => {
+    setViolationData(null);
+    if (typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.resumeLockdown();
+    }
+  };
+
   const lastSyncTs = useRef<string>("");
   const timeInitialized = useRef<boolean>(false);
 
@@ -377,6 +396,38 @@ function ActiveSessionInner() {
           End Session
         </motion.button>
       </div>
+
+      {/* GHOST WARDEN VIOLATION OVERLAY */}
+      <AnimatePresence>
+        {violationData && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="fixed inset-0 z-[9999] bg-black text-white flex flex-col justify-center items-center p-10 text-center shadow-[inset_0_0_150px_rgba(220,38,38,0.2)]"
+          >
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-red-600/[0.15] blur-[100px] rounded-full pointer-events-none" />
+            <h1 className="relative z-10 text-5xl md:text-6xl font-black mb-6 text-red-600 animate-pulse drop-shadow-[0_0_20px_rgba(220,38,38,0.6)]" style={{ fontFamily: "var(--font-headline)" }}>
+              ⚠️ DISTRACTION DETECTED
+            </h1>
+            <p className="relative z-10 text-xl md:text-2xl text-text-secondary mb-10 tracking-[0.2em] uppercase font-semibold">
+              YOU ATTEMPTED TO ACCESS: <span className="text-white bg-red-900/30 px-4 py-1.5 rounded-lg border border-red-500/50 shadow-[0_0_15px_rgba(220,38,38,0.3)] mx-2" style={{ fontFamily: "var(--font-mono)" }}>{violationData.app}</span>
+            </p>
+            <motion.button 
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleResumeLockdown} 
+              className="relative z-10 bg-white text-black font-black px-12 py-5 rounded-full text-xl shadow-[0_0_30px_rgba(255,255,255,0.3)] tracking-widest cursor-pointer hover:bg-gray-200 transition-colors"
+            >
+              RETURN TO TARGET
+            </motion.button>
+            <div className="relative z-10 mt-12 text-red-900/80 text-xs font-bold tracking-[0.4em]">
+              SYSTEM LOCK ACTIVE • NO ESCAPE POSSIBLE
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

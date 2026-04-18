@@ -82,6 +82,17 @@ const ENERGY_LEVELS: EnergyLevel[] = [
   { value: 5, label: "Peak", emoji: "🔥" },
 ];
 
+const AVAILABLE_APPS = [
+  { id: 'vscode', name: 'VS CODE', icon: '💻' },
+  { id: 'word', name: 'MS WORD', icon: '📝' },
+  { id: 'ppt', name: 'POWERPOINT', icon: '📊' },
+  { id: 'excel', name: 'EXCEL', icon: '📈' },
+  { id: 'notepad', name: 'NOTEPAD', icon: '📒' },
+  { id: 'calculator', name: 'CALCULATOR', icon: '🧮' },
+  { id: 'git', name: 'GIT BASH', icon: '🐙' },
+  { id: 'snippingtool', name: 'SNIPPING TOOL', icon: '✂️' }
+];
+
 /* ─── Animation Variants ─── */
 const pageVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -129,6 +140,9 @@ export default function SessionSetupPage() {
   
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [importedTaskIds, setImportedTaskIds] = useState<string[]>([]);
+
+  const [primaryApp, setPrimaryApp] = useState<string>("vscode");
+  const [allowedApps, setAllowedApps] = useState<string[]>(["vscode"]);
 
   /* ── Handlers ── */
   const addTask = useCallback(() => {
@@ -200,6 +214,15 @@ export default function SessionSetupPage() {
       // Delete imported tasks from the global database
       if (importedTaskIds.length > 0) {
         await removeTasks(importedTaskIds);
+      }
+
+      if (focusMode === "strict" && typeof window !== "undefined" && window.electronAPI) {
+        window.electronAPI.initiateLockdown({
+          allowedApps,
+          primaryApp,
+          duration,
+          strictMode: true
+        });
       }
       
       router.push(`/session/active?id=${sessionId}`);
@@ -580,6 +603,94 @@ export default function SessionSetupPage() {
                 })}
               </div>
             </motion.div>
+
+            {/* Strict Mode Properties Card */}
+            <AnimatePresence mode="popLayout">
+              {focusMode === "strict" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-bg-secondary border border-accent-warning/50 rounded-2xl p-6 overflow-hidden shadow-[0_0_20px_var(--warning-glow)]"
+                >
+                  <div className="flex items-center gap-2.5 mb-4">
+                    <Target size={18} style={{ color: "var(--accent-warning)" }} />
+                    <h3
+                      className="text-sm font-semibold uppercase tracking-widest text-text-secondary"
+                      style={{ fontFamily: "var(--font-headline)" }}
+                    >
+                      Target Application
+                    </h3>
+                  </div>
+                  <p className="text-xs text-text-tertiary mb-4 tracking-wide leading-relaxed">
+                    In Strict Mode, FocusOS will hide itself. If you switch to any application other than your Target App, you will be violently alerted.
+                  </p>
+                  
+                  <div className="space-y-2 mb-4">
+                    <label className="text-xs font-semibold text-text-secondary flex items-center gap-2 tracking-widest uppercase">
+                      Primary App
+                    </label>
+                    <select
+                      value={primaryApp}
+                      onChange={(e) => {
+                        setPrimaryApp(e.target.value);
+                        if (!allowedApps.includes(e.target.value)) {
+                          setAllowedApps(prev => [...prev, e.target.value]);
+                        }
+                      }}
+                      className="w-full bg-bg-elevated border border-border rounded-xl p-3 text-text-primary text-sm focus:outline-none focus:border-accent-warning transition-all"
+                    >
+                      {AVAILABLE_APPS.map(app => (
+                        <option key={app.id} value={app.id}>
+                          {app.icon} {app.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2 mb-3">
+                    <label className="text-xs font-semibold text-text-secondary flex items-center gap-2 tracking-widest uppercase">
+                      Allowed Apps
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {AVAILABLE_APPS.map(app => {
+                        const isAllowed = allowedApps.includes(app.id);
+                        return (
+                          <button
+                            key={app.id}
+                            type="button"
+                            onClick={() => {
+                              setAllowedApps(prev => {
+                                if (prev.includes(app.id)) {
+                                  if (prev.length === 1) return prev; // Must have at least one app
+                                  const filtered = prev.filter(a => a !== app.id);
+                                  if (primaryApp === app.id) setPrimaryApp(filtered[0]);
+                                  return filtered;
+                                }
+                                return [...prev, app.id];
+                              });
+                            }}
+                            className={`p-2.5 border rounded-xl text-xs flex items-center justify-between transition-all duration-200 cursor-pointer ${
+                              isAllowed 
+                                ? 'border-accent-warning bg-accent-warning/20 text-white shadow-[0_0_10px_var(--warning-glow)]' 
+                                : 'border-border bg-bg-elevated text-text-secondary hover:border-border-glow hover:text-text-primary'
+                            }`}
+                          >
+                            <span>{app.icon} {app.name}</span>
+                            {isAllowed && (
+                                <div className="w-1.5 h-1.5 rounded-full bg-accent-warning" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-text-tertiary text-center mt-3 tracking-widest">
+                    EMERGENCY EXIT: <span className="text-text-secondary font-mono">CTRL + SHIFT + X</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Energy Level Card */}
             <motion.div
