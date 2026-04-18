@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity, MessageSquare } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { ref, onValue, get, set } from "firebase/database";
+import { ref, onValue, get, set, query, limitToLast, onChildAdded } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
 import { getSessionRTDB, updateSessionRTDB } from "@/lib/firestore/sessions";
 import { logPCEventRTDB } from "@/lib/firestore/events";
@@ -81,52 +81,42 @@ function ActiveSessionInner() {
     }
   }, [sessionId]);
 
-  // 2. Tab Visibility Detection
-  useEffect(() => {
-    if (!user || !sessionId) return;
-    const handleVisibility = () => {
-      if (document.hidden) {
-        addLog("distraction", "Tab visibility lost");
-        logPCEventRTDB(user.uid, sessionId, { type: "tab_leave", timestamp: new Date().toISOString() }).catch(console.error);
-        setIsPaused(true);
-      } else {
-        addLog("success", "Returned to tab");
-        logPCEventRTDB(user.uid, sessionId, { type: "tab_return", timestamp: new Date().toISOString() }).catch(console.error);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [user, sessionId]);
 
-  // 3. Phone Real-Time Sync (Simplified to listen to user document)
+
+  // 3. Phone Real-Time Sync (Android Companion App)
   useEffect(() => {
     if (!user || !sessionId) return;
     
-    // Listening for bridge updates from phone
-    // Assuming phone still writes to users/{userId}/activeSessionBridge for cross-device alerts
-    const bridgeRef = ref(rtdb, `users/${user.uid}/activeSessionBridge`);
+    // Listen directly to the new session notifications path provided by the scanner
+    const notificationsRef = ref(rtdb, `users/${user.uid}/sessions/${sessionId}/notification`);
+    const recentQuery = query(notificationsRef, limitToLast(1));
     
-    const unsub = onValue(bridgeRef, (snapshot) => {
+    const unsub = onChildAdded(recentQuery, (snapshot) => {
       if (snapshot.exists()) {
-        const data = snapshot.val();
-        if (data.sessionId === sessionId && data.lastPhoneEvent) {
-          const ev = data.lastPhoneEvent;
+        const ev = snapshot.val();
+        
+        // Prevent duplicate processing on reloads
+        if (ev.timestamp && ev.timestamp === lastSyncTs.current) return;
+        if (ev.timestamp) lastSyncTs.current = ev.timestamp;
+        
+        if (ev.type === "pickup") {
+          addLog("distraction", "Phone picked up");
+        } else if (ev.type === "putdown") {
+          addLog("success", "Phone placed face-down");
+        } else if (ev.type === "intent_logged") {
+          addLog("system", `Recorded phone use: ${ev.intent}`);
+        } else if (ev.type === "important_notification") {
+          setActiveNotification({ title: "Important Notification", message: ev.message });
+          addLog("system", `Message from: ${ev.message}`);
+          setTimeout(() => setActiveNotification(null), 5000);
+        } else {
+          // Native Android Notification handler fallback
+          const title = ev.title || ev.packageName || "Phone Alert";
+          const text = ev.text || ev.message || "New activity detected";
           
-          if (ev.timestamp !== lastSyncTs.current) {
-            lastSyncTs.current = ev.timestamp;
-            
-            if (ev.type === "pickup") {
-              addLog("distraction", "Phone picked up");
-            } else if (ev.type === "putdown") {
-              addLog("success", "Phone placed face-down");
-            } else if (ev.type === "intent_logged") {
-              addLog("system", `Recorded phone use: ${ev.intent}`);
-            } else if (ev.type === "important_notification") {
-              setActiveNotification({ title: "Important Notification", message: ev.message });
-              addLog("system", `Intercepted: ${ev.message}`);
-              setTimeout(() => setActiveNotification(null), 5000);
-            }
-          }
+          setActiveNotification({ title, message: text });
+          addLog("distraction", `Intercepted: ${title} - ${text}`);
+          setTimeout(() => setActiveNotification(null), 5000);
         }
       }
     });
