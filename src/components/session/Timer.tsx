@@ -18,11 +18,16 @@ interface TimerProps {
 }
 
 /* ─── Helpers ─── */
-function formatTime(seconds: number): { minutes: string; secs: string } {
-  const clamped = Math.max(0, Math.floor(seconds));
-  const m = Math.floor(clamped / 60);
+function formatTime(seconds: number): { hours: string; minutes: string; secs: string } {
+  const maxLimit = 24 * 3600; 
+  const clamped = Math.min(maxLimit, Math.max(0, Math.floor(seconds)));
+  
+  const h = Math.floor(clamped / 3600);
+  const m = Math.floor((clamped % 3600) / 60);
   const s = clamped % 60;
+  
   return {
+    hours: String(h).padStart(2, "0"),
     minutes: String(m).padStart(2, "0"),
     secs: String(s).padStart(2, "0"),
   };
@@ -65,7 +70,7 @@ export default function Timer({
   const glowColor = getPhaseGlow(progress);
 
   /* ── Formatted time ── */
-  const { minutes, secs } = useMemo(
+  const { hours, minutes, secs } = useMemo(
     () => formatTime(remainingSeconds),
     [remainingSeconds]
   );
@@ -172,45 +177,41 @@ export default function Timer({
       {/* ── Center Content ── */}
       <div className="relative z-10 flex flex-col items-center justify-center">
         {/* Time Display */}
-        <div className="flex items-baseline gap-0.5">
-          <motion.span
-            key={minutes}
-            initial={{ y: -8, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.3 }}
-            className="text-5xl font-bold text-text-primary tracking-tight"
-            style={{ fontFamily: "var(--font-mono)" }}
-          >
-            {minutes}
-          </motion.span>
+        <div className="flex items-baseline gap-1" style={{ fontFamily: "var(--font-mono)" }}>
+          {/* Hours */}
+          <span className="text-5xl font-bold text-text-primary tracking-tight">
+            {hours}
+          </span>
 
-          {/* Blinking colon */}
+          {/* First Colon */}
           <motion.span
             animate={{ opacity: isPaused ? [1, 0.3, 1] : 1 }}
-            transition={
-              isPaused
-                ? { duration: 1, repeat: Infinity, ease: "easeInOut" }
-                : {}
-            }
-            className="text-4xl font-bold mx-0.5"
-            style={{
-              fontFamily: "var(--font-mono)",
-              color: ringColor,
-            }}
+            transition={isPaused ? { duration: 1, repeat: Infinity, ease: "easeInOut" } : {}}
+            className="text-4xl font-bold"
+            style={{ color: ringColor }}
           >
             :
           </motion.span>
 
+          {/* Minutes */}
+          <span className="text-5xl font-bold text-text-primary tracking-tight">
+            {minutes}
+          </span>
+
+          {/* Second Colon */}
           <motion.span
-            key={secs}
-            initial={{ y: -8, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.3 }}
-            className="text-5xl font-bold text-text-primary tracking-tight"
-            style={{ fontFamily: "var(--font-mono)" }}
+            animate={{ opacity: isPaused ? [1, 0.3, 1] : 1 }}
+            transition={isPaused ? { duration: 1, repeat: Infinity, ease: "easeInOut" } : {}}
+            className="text-4xl font-bold"
+            style={{ color: ringColor }}
           >
-            {secs}
+            :
           </motion.span>
+
+          {/* Seconds */}
+          <span className="text-5xl font-bold text-text-primary tracking-tight">
+            {secs}
+          </span>
         </div>
 
         {/* Status Label */}

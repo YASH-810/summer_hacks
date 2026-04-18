@@ -14,20 +14,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      // Check if user has completed onboarding
-      getUserProfile(user.uid)
-        .then(profile => {
-          if (profile && profile.onboardingComplete) {
-            router.push("/dashboard");
-          } else {
-            router.push("/session/setup");
-          }
-        })
-        .catch(err => {
-          console.error("Failed to fetch user profile (likely a security rule error):", err);
-          // Fallback to session setup so they aren't stuck loading forever
-          router.push("/session/setup");
-        });
+      router.push("/dashboard");
     }
   }, [user, loading, router]);
 

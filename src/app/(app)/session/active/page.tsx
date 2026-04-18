@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import Timer from "@/components/session/Timer";
 import { motion, AnimatePresence } from "framer-motion";
-import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity, MessageSquare } from "lucide-react";
+import { Coffee, Flag, AlertTriangle, CheckCircle2, Circle, Activity, MessageSquare, Trophy, Clock, Target, Zap, ArrowRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { ref, onValue, get, set, query, limitToLast, onChildAdded } from "firebase/database";
@@ -11,6 +11,18 @@ import { rtdb } from "@/lib/firebase";
 import { getSessionRTDB, updateSessionRTDB } from "@/lib/firestore/sessions";
 import { logPCEventRTDB } from "@/lib/firestore/events";
 import { Session, Task } from "@/types";
+
+interface SessionAnalytics {
+  title: string;
+  plannedMinutes: number;
+  actualMinutes: number;
+  tasksTotal: number;
+  tasksCompleted: number;
+  distractionCount: number;
+  focusScore: number;
+  startTime: string;
+  endTime: string;
+}
 
 function ActiveSessionInner() {
   const router = useRouter();
@@ -23,6 +35,9 @@ function ActiveSessionInner() {
   const [isPaused, setIsPaused] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
+  
+  // Analytics debrief state
+  const [analytics, setAnalytics] = useState<SessionAnalytics | null>(null);
   
   // Notification banner state
   const [activeNotification, setActiveNotification] = useState<{ title: string; message: string } | null>(null);
@@ -164,7 +179,46 @@ function ActiveSessionInner() {
     if (!user || !sessionId) return;
 
     try {
-      // 1. Return unfinished tasks to global backlog
+      const endTime = new Date().toISOString();
+      const plannedMin = sessionData?.plannedDuration || 25;
+      const totalSec = plannedMin * 60;
+      const elapsedSec = totalSec - remaining;
+      const actualMin = Math.round(elapsedSec / 60);
+      const completed = tasks.filter(t => t.done).length;
+      const distractions = logs.filter(l => l.type === "distraction").length;
+
+      // Calculate focus score (0-100)
+      const timeRatio = Math.min(1, elapsedSec / totalSec);
+      const taskRatio = tasks.length > 0 ? completed / tasks.length : 1;
+      const distractionPenalty = Math.min(1, distractions * 0.1);
+      const focusScore = Math.round(
+        (timeRatio * 40 + taskRatio * 40 + (1 - distractionPenalty) * 20)
+      );
+
+      // Build analytics object
+      const sessionAnalytics: SessionAnalytics = {
+        title: sessionData?.title || "Focus Session",
+        plannedMinutes: plannedMin,
+        actualMinutes: actualMin,
+        tasksTotal: tasks.length,
+        tasksCompleted: completed,
+        distractionCount: distractions,
+        focusScore,
+        startTime: sessionData?.startTime || sessionData?.createdAt || new Date().toISOString(),
+        endTime,
+      };
+
+      // 1. Archive session to history
+      const historyRef = ref(rtdb, `users/${user.uid}/history/${sessionId}`);
+      await set(historyRef, {
+        ...sessionAnalytics,
+        id: sessionId,
+        focusMode: sessionData?.focusMode || "balanced",
+        tasks,
+        logs: logs.slice(0, 50),
+      });
+
+      // 2. Return unfinished tasks to global backlog
       const unfinishedTasks = tasks.filter(t => !t.done);
       if (unfinishedTasks.length > 0) {
         const globalTasksRef = ref(rtdb, `users/${user.uid}/tasks`);
@@ -173,33 +227,145 @@ function ActiveSessionInner() {
         if (snapshot.exists()) {
           currentGlobalTasks = snapshot.val() as Task[];
         }
-        
-        // Append unfinished tasks
         const updatedGlobalTasks = [...unfinishedTasks, ...currentGlobalTasks];
         await set(globalTasksRef, updatedGlobalTasks);
       }
 
-      // 2. Delete the session completely from RTDB
+      // 3. Delete the active session from RTDB
       const sessionRef = ref(rtdb, `users/${user.uid}/sessions/${sessionId}`);
       await set(sessionRef, null);
 
-      // Redirect to session/active as requested
-      router.push(`/session/active`);
+      // 4. Show debrief instead of redirecting
+      setAnalytics(sessionAnalytics);
     } catch (error) {
       console.error("Error ending session:", error);
-      // Fallback redirect
-      router.push(`/session/active`);
+      router.push(`/dashboard`);
     }
   };
 
-  const simulateNotification = () => {
-    setActiveNotification({ title: "Important Notification", message: "Mom: Are you coming home for dinner?" });
-    addLog("system", `Intercepted: Mom: Are you coming home for dinner?`);
-    
-    setTimeout(() => {
-      setActiveNotification(null);
-    }, 5000);
-  };
+
+
+  // ── Analytics Debrief Screen ──
+  if (analytics) {
+    const taskPercent = analytics.tasksTotal > 0 ? Math.round((analytics.tasksCompleted / analytics.tasksTotal) * 100) : 100;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-bg-primary text-text-primary px-4 text-center relative overflow-hidden">
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-accent-primary/[0.06] blur-[120px] rounded-full pointer-events-none" />
+        <div className="absolute bottom-1/4 right-1/4 w-[300px] h-[300px] bg-accent-secondary/[0.05] blur-[100px] rounded-full pointer-events-none" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="max-w-2xl w-full relative z-10"
+        >
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="mb-8"
+          >
+            <div className="w-20 h-20 bg-accent-secondary/10 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_40px_rgba(0,212,170,0.2)] border border-accent-secondary/30">
+              <Trophy className="w-9 h-9 text-accent-secondary" />
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight text-white mb-2" style={{ fontFamily: "var(--font-headline)" }}>Session Complete</h1>
+            <p className="text-text-secondary text-sm">{analytics.title}</p>
+          </motion.div>
+
+          {/* Focus Score Ring */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, type: "spring", stiffness: 150 }}
+            className="mb-10"
+          >
+            <div className="relative w-36 h-36 mx-auto">
+              <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="52" fill="none" stroke="var(--border)" strokeWidth="8" opacity="0.3" />
+                <motion.circle
+                  cx="60" cy="60" r="52" fill="none"
+                  stroke={analytics.focusScore >= 70 ? "var(--accent-secondary)" : analytics.focusScore >= 40 ? "var(--accent-warning)" : "var(--accent-danger)"}
+                  strokeWidth="8" strokeLinecap="round"
+                  strokeDasharray={2 * Math.PI * 52}
+                  initial={{ strokeDashoffset: 2 * Math.PI * 52 }}
+                  animate={{ strokeDashoffset: 2 * Math.PI * 52 * (1 - analytics.focusScore / 100) }}
+                  transition={{ delay: 0.5, duration: 1.2, ease: "easeOut" }}
+                  style={{ filter: `drop-shadow(0 0 8px ${analytics.focusScore >= 70 ? "rgba(0,212,170,0.4)" : analytics.focusScore >= 40 ? "rgba(255,159,67,0.4)" : "rgba(255,71,87,0.4)"})` }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.8 }}
+                  className="text-4xl font-bold text-text-primary"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
+                  {analytics.focusScore}
+                </motion.span>
+                <span className="text-[10px] text-text-tertiary uppercase tracking-widest mt-0.5">Focus Score</span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Stats Grid */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10"
+          >
+            {[
+              { icon: Clock, label: "Focus Time", value: `${analytics.actualMinutes}m`, sub: `of ${analytics.plannedMinutes}m`, color: "var(--accent-primary)" },
+              { icon: CheckCircle2, label: "Tasks Done", value: `${analytics.tasksCompleted}/${analytics.tasksTotal}`, sub: `${taskPercent}%`, color: "var(--accent-secondary)" },
+              { icon: AlertTriangle, label: "Distractions", value: String(analytics.distractionCount), sub: analytics.distractionCount === 0 ? "Perfect!" : "Detected", color: analytics.distractionCount === 0 ? "var(--accent-secondary)" : "var(--accent-warning)" },
+              { icon: Zap, label: "Efficiency", value: `${taskPercent}%`, sub: taskPercent >= 80 ? "Excellent" : taskPercent >= 50 ? "Good" : "Needs work", color: "var(--accent-primary)" },
+            ].map((stat, i) => (
+              <motion.div
+                key={stat.label}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 + i * 0.1 }}
+                className="bg-bg-secondary border border-border rounded-2xl p-5 flex flex-col items-center gap-2 hover:border-border-glow transition-colors"
+              >
+                <stat.icon size={20} style={{ color: stat.color }} />
+                <span className="text-[10px] uppercase tracking-widest text-text-tertiary font-semibold" style={{ fontFamily: "var(--font-headline)" }}>{stat.label}</span>
+                <span className="text-2xl font-bold text-text-primary" style={{ fontFamily: "var(--font-mono)" }}>{stat.value}</span>
+                <span className="text-xs text-text-secondary">{stat.sub}</span>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          {/* Action Buttons */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1 }}
+            className="flex gap-4 justify-center"
+          >
+            <motion.button 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => router.push('/dashboard')}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-xl border border-border bg-bg-secondary text-text-primary hover:border-border-glow transition-all font-semibold text-sm cursor-pointer"
+            >
+              Dashboard
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => router.push('/session/setup')}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-accent-primary text-white hover:brightness-110 shadow-[0_0_20px_rgba(108,99,255,0.25)] transition-all font-semibold text-sm cursor-pointer"
+            >
+              New Session
+              <ArrowRight size={16} />
+            </motion.button>
+          </motion.div>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (!sessionId) {
     return (
@@ -354,28 +520,6 @@ function ActiveSessionInner() {
 
       {/* BOTTOM BAR: Fixed Controls */}
       <div className="fixed bottom-0 left-0 w-full h-24 bg-bg-secondary/70 backdrop-blur-2xl border-t border-border flex items-center justify-center gap-4 sm:gap-6 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-        <motion.button 
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={simulateNotification}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl border border-accent-secondary/50 text-accent-secondary hover:bg-accent-secondary/10 hover:border-accent-secondary transition-colors font-medium text-sm cursor-pointer"
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span className="hidden sm:inline">Simulate Text</span>
-          <span className="sm:hidden">Test</span>
-        </motion.button>
-
-        <motion.button 
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setIsPaused(true)}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl border border-accent-warning/50 text-accent-warning hover:bg-accent-warning/10 hover:border-accent-warning transition-colors font-medium text-sm cursor-pointer"
-        >
-          <AlertTriangle className="w-4 h-4" />
-          <span className="hidden sm:inline">I got distracted</span>
-          <span className="sm:hidden">Distracted</span>
-        </motion.button>
-
         <motion.button 
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}

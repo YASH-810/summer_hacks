@@ -7,5 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   endBreak: () => ipcRenderer.send('end-break'),
   onTriggerBreak: (callback) => ipcRenderer.on('trigger-break', callback),
   onUpdateApp: (callback) => ipcRenderer.on('update-app', callback),
-  onViolation: (callback) => ipcRenderer.on('violation', (event, data) => callback(data))
+  onViolation: (callback) => ipcRenderer.on('violation', (event, data) => callback(data)),
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  maximizeWindow: () => ipcRenderer.send('window-maximize'),
+  closeWindow: () => ipcRenderer.send('window-close'),
 });

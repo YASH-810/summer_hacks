@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -9,7 +9,10 @@ import {
   ListTodo, 
   LayoutDashboard, 
   Settings,
-  Zap
+  Zap,
+  Minus,
+  Square,
+  X
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -23,10 +26,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isTasksModalOpen, setIsTasksModalOpen] = useState(false);
 
+  // Keyboard shortcut: Ctrl+G to toggle Global Tasks modal (only on dashboard & setup)
+  const isShortcutAllowed = pathname === "/dashboard" || pathname === "/session/setup";
+
+  useEffect(() => {
+    if (!isShortcutAllowed) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "g") {
+        e.preventDefault();
+        setIsTasksModalOpen(prev => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isShortcutAllowed]);
+
   return (
     <div className="flex min-h-screen bg-bg-primary">
       {/* ── Sidebar ── */}
-      <aside className="w-20 md:w-64 border-r border-border bg-bg-secondary flex flex-col items-center md:items-stretch py-6 px-4 shrink-0 transition-all duration-300">
+      {pathname !== "/session/active" && pathname !== "/dashboard" && pathname !== "/session/setup" && (
+        <aside className="w-20 md:w-64 border-r border-border bg-bg-secondary flex flex-col items-center md:items-stretch py-6 px-4 shrink-0 transition-all duration-300">
         <div className="flex items-center gap-3 px-2 mb-10">
           <div className="w-10 h-10 rounded-xl bg-accent-primary flex items-center justify-center shadow-[0_0_20px_var(--focus-glow)]">
             <Target size={22} color="white" />
@@ -85,10 +106,50 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden md:block text-sm font-semibold">Settings</span>
           </motion.div>
         </div>
-      </aside>
+        </aside>
+      )}
 
       {/* ── Main Content Area ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        {/* ── Window Controls (top-right) — hidden during active sessions ── */}
+        {pathname !== "/session/active" && (
+        <div className="fixed top-0 right-0 z-50 flex items-center gap-0" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined" && window.electronAPI?.minimizeWindow) {
+                window.electronAPI.minimizeWindow();
+              }
+            }}
+            className="w-12 h-10 flex items-center justify-center text-text-tertiary hover:bg-white/[0.06] hover:text-text-primary transition-colors cursor-pointer"
+            title="Minimize"
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined" && window.electronAPI?.maximizeWindow) {
+                window.electronAPI.maximizeWindow();
+              }
+            }}
+            className="w-12 h-10 flex items-center justify-center text-text-tertiary hover:bg-white/[0.06] hover:text-text-primary transition-colors cursor-pointer"
+            title="Maximize"
+          >
+            <Square size={13} />
+          </button>
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined" && window.electronAPI?.closeWindow) {
+                window.electronAPI.closeWindow();
+              }
+            }}
+            className="w-12 h-10 flex items-center justify-center text-text-tertiary hover:bg-red-500/80 hover:text-white transition-colors cursor-pointer"
+            title="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        )}
+
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {children}
         </div>

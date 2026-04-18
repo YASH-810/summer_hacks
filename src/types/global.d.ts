@@ -15,6 +15,9 @@ declare global {
       onTriggerBreak: (callback: () => void) => void;
       onUpdateApp: (callback: (app: any) => void) => void;
       onViolation: (callback: (data: { app: string }) => void) => void;
+      minimizeWindow: () => void;
+      maximizeWindow: () => void;
+      closeWindow: () => void;
     };
   }
 }

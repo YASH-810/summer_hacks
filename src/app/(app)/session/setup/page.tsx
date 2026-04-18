@@ -21,6 +21,7 @@ import {
   ListChecks,
   Settings2,
   ArrowDownToLine,
+  ArrowLeft,
   type LucideIcon,
 } from "lucide-react";
 import type { FocusMode, Task } from "@/types";
@@ -257,6 +258,15 @@ export default function SessionSetupPage() {
       >
         {/* Page Title */}
         <motion.div className="mb-8" variants={cardVariants}>
+          <motion.button
+            whileHover={{ x: -4 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => router.push('/dashboard')}
+            className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary mb-4 transition-colors cursor-pointer"
+          >
+            <ArrowLeft size={16} />
+            Back to Dashboard
+          </motion.button>
           <h2
             className="text-2xl md:text-3xl font-bold text-text-primary mb-2"
             style={{ fontFamily: "var(--font-headline)" }}
@@ -692,51 +702,7 @@ export default function SessionSetupPage() {
               )}
             </AnimatePresence>
 
-            {/* Energy Level Card */}
-            <motion.div
-              className="bg-bg-secondary border border-border rounded-2xl p-6"
-              variants={cardVariants}
-            >
-              <div className="flex items-center gap-2.5 mb-4">
-                <Battery
-                  size={18}
-                  style={{ color: "var(--accent-primary)" }}
-                />
-                <h3
-                  className="text-sm font-semibold uppercase tracking-widest text-text-secondary"
-                  style={{ fontFamily: "var(--font-headline)" }}
-                >
-                  Energy Level
-                </h3>
-              </div>
 
-              <div className="flex gap-2">
-                {ENERGY_LEVELS.map((lvl) => (
-                  <motion.button
-                    key={lvl.value}
-                    whileHover={{ scale: 1.08 }}
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => setEnergy(lvl.value)}
-                    className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all duration-200 cursor-pointer ${
-                      energy === lvl.value
-                        ? "border-accent-primary bg-bg-elevated shadow-[0_0_20px_var(--focus-glow)]"
-                        : "border-border bg-bg-elevated hover:border-border-glow"
-                    }`}
-                  >
-                    <span className="text-xl">{lvl.emoji}</span>
-                    <span
-                      className={`text-[10px] font-medium ${
-                        energy === lvl.value
-                          ? "text-accent-primary"
-                          : "text-text-tertiary"
-                      }`}
-                    >
-                      {lvl.label}
-                    </span>
-                  </motion.button>
-                ))}
-              </div>
-            </motion.div>
           </div>
         </div>
 
