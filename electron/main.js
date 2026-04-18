@@ -97,7 +97,6 @@ ipcMain.on('initiate-lockdown', (event, config) => {
   }
 
   if (strictMode) {
-    mainWindow.setAlwaysOnTop(true, 'screen-saver');
     const keys = [
       'Alt+Tab',
       'Alt+F4',
